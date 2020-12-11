@@ -1,0 +1,1042 @@
+---
+title: "FinalProjectDS5100"
+author: "Ari Fleischer and Brianna Vetter"
+date: "12/11/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Final Project Code 
+
+This section just reads in the datasets and does some basic tidying
+```{r }
+#11/15
+#Brianna 
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(ggplot2)
+library(gapminder)
+library(tidyverse)
+library(modelr)
+library(mlbench)
+
+dfPolls<-read_csv('presidential_polls.csv')
+dfPolls
+
+#0 are NA here so need to correct that
+dfIncome<-read_csv('Kaggle_income.csv', na=c("0")) 
+dfIncome
+
+#Need to split county and state 
+dfElection<-read_delim('usa-2016-presidential-election-by-county.csv',
+                       delim = ';')
+dfElection
+dfElection <- separate(dfElection, County, into = c("County", "State"),sep=", ")
+dfElection
+```
+
+This section gets the state polls that were wrong in the last month with grade
+B+ or better
+``` {r statepolls}
+#11/22
+#Ari 
+
+# For chloropleths
+states <- map_data("state")
+
+# Transform the election data from by county to by state
+electionState <- dfElection %>% 
+                 group_by(State, ST) %>%
+                 summarise(DemVote = sum(`Votes16 Clintonh`, na.rm = TRUE),
+                           RepVote = sum(`Votes16 Trumpd`, na.rm = TRUE)) %>%
+                 mutate(`Actual Winner` = ifelse(RepVote > DemVote, "Trump", 
+                                            "Clinton"))
+
+polls <- dfPolls %>%
+         mutate(`Predicted Winner` = ifelse(adjpoll_trump > adjpoll_clinton, 
+                                            "Trump", "Clinton"))
+
+# Wrong polls filtered by grade B+ or better and only from the last month
+wrongpollslastmonth <- inner_join(electionState, polls, 
+                                  by = c("State" = "state")) %>%
+                       filter(`Actual Winner` != `Predicted Winner` & 
+                               grade %in% c("B+", "A-", "A") &
+                               (str_detect(startdate, "^10") | 
+                               str_detect(startdate, "^11"))) %>%
+                      select(State, `Predicted Winner`, `Actual Winner`, grade, 
+                              startdate, enddate) 
+
+ggplot(data = wrongpollslastmonth, mapping = aes(y = State, 
+                                                 fill = `Predicted Winner`)) +
+  geom_bar() + 
+  labs(title = "Many state polls from the last month with grade B+ or better
+       inaccurately predicted the `16 election",
+       x = "Number of Incorrect Polls", y = "State") +
+  scale_fill_manual(values = c("blue", "red")) +
+  theme_minimal()
+
+countwrongpolls1 <- count(wrongpollslastmonth) %>%
+  inner_join(wrongpollslastmonth, by = "State") %>%
+  rename("Polls Wrong" = n) %>%
+  select(State, `Predicted Winner`, `Actual Winner`, 
+         `Polls Wrong`) %>%
+  distinct()
+
+mutate(countwrongpolls1, State = tolower(State)) %>%
+  right_join(states, by = c("State" = "region")) %>%
+  ggplot() + 
+  geom_polygon(aes(x = long, y = lat, fill = `Predicted Winner`, 
+                   alpha = `Polls Wrong`, group = group),
+               color = "black") +
+  coord_fixed(1.5) +
+  scale_fill_manual(values = c("blue", "red")) +
+  labs(title = "Many state polls inaccurately predicted the `16 election",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+
+# Map of US showing only the states that had more than 15 incorrect polls from 
+# October or November with a grade of B+ or better
+mutate(countwrongpolls1, State = tolower(State)) %>%
+  filter(`Polls Wrong` >= 15) %>%
+  right_join(states, by = c("State" = "region")) %>%
+  ggplot() + 
+  geom_polygon(aes(x = long, y = lat, fill = `Predicted Winner`, group = group),
+               color = "black") +
+  coord_fixed(1.5) +
+  scale_fill_manual(values = c("blue", "red")) +
+  labs(title = "States with most innaccurate state polls all predicted Clinton 
+       would win",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+```
+
+This section combines that datasets 
+```{r }
+#11/15
+#Brianna
+dfElection2 <- select(dfElection, County, State, Votes, `Republicans 2016`,
+                      `Democrats 2016`, `At Least High School Diploma` ,
+                      `At Least Bachelors's Degree`, `Graduate Degree` , 
+                      `White (Not Latino) Population`, 
+                      `African American Population`,
+                      `Native American Population` , `Asian American Population`,
+                      `Other Race or Races`, `Latino Population`, 
+                      `Children Under 6 Living in Poverty`, 
+                      `Adults 65 and Older Living in Poverty`, 
+                      `Total Population`,
+                      `Poverty.Rate.below.federal.poverty.threshold`,
+                      `Median Age`, `Unemployment`)
+#way more that can be used. sooo sooo many. consider dropping unneeded ones instead?
+
+# Ari: I fixed this because data was given by city so found avg value of mean,
+# median, and stdev for each county. This makes graph look much better
+dfElection2[1:10,]
+dfIncome2 <- dfIncome %>% group_by(County, State_Name) %>%
+             mutate(Mean = mean(Mean, na.rm = TRUE), 
+                    Median = mean(Median, na.rm = TRUE),
+                    Stdev = mean(Stdev, na.rm = TRUE)) %>%
+            select(State_Name, County, Mean, Median, Stdev ) %>%
+            distinct()
+
+dfIncome2[1:10,]
+
+dfUnemployment2 <- select(dfUnemployment, State, County, Rate)
+dfUnemployment2
+
+dfUnemployment3 <-dfUnemployment2 %>%
+                        group_by(County) %>%
+                        summarize(mean(Rate, na.rm=TRUE))
+
+dfUnemployment3
+
+combinedSet <- inner_join(dfElection2, dfIncome2, by = c("County"= "County", 
+                                                         "State" = "State_Name"))
+ggplot(data=combinedSet) + geom_bar(aes(y=State), stat = "count") +
+  labs(x="state", y="number of counties") + 
+  ggtitle("Number of Countries in Each State")
+
+combinedSet <-na.omit(combinedSet)
+```
+
+Cuts the dataset down to just swing states and shows a couple of count figures 
+```{r }
+#adding in how much of population voted
+combinedSet2 <- combinedSet %>%
+  mutate(voterProportion = Votes/`Total Population`). 
+combinedSet2
+
+#Swing State data brings us down to 230 rows 
+swingStatesdf <- combinedSet2 %>%
+  filter(State %in% c("Michigan", "Florida", "North Carolina", "Pennsylvania", 
+                      "Wisconsin")) %>%
+  rename(`Poverty Rate` = `Poverty.Rate.below.federal.poverty.threshold`)
+swingStatesdf 
+
+electionSwingState <- dfElection2 %>%
+                      filter(State %in% c("Michigan", "Florida", 
+                                          "North Carolina", "Pennsylvania", 
+                                          "Wisconsin"))
+
+electionSwingState1 <- electionSwingState %>%
+                       count()
+
+
+ggplot(data = swingStatesdf, mapping = aes(y = State)) +
+  geom_bar() +
+  labs(y="State",x="Number of Counties") + 
+  ggtitle("Number of Countries in Each Swing State")
+```
+
+Splitting up the swing state data into train, validation, and test
+```{r}
+#Splitting Swing State Data up into train, validation, and test
+RNGkind(sample.kind = "Rejection")
+set.seed(1)
+swingStatesPart <- resample_partition(swingStatesdf, 
+                                     p=c(train=0.5, 
+                                         valid=0.25,
+                                         test=0.25))
+
+# Get the training 
+swingStatesTrain <- swingStatesdf[as.integer(swingStatesPart$train),]
+swingStatesTest <- swingStatesdf[as.integer(swingStatesPart$test),]
+```
+
+This section shows many different graphs for different variable options. 
+```{r}
+swingStatesTrain
+
+#Voter Proportion
+ggplot(data=swingStatesTrain, mapping = aes(y=`Democrats 2016`,
+                                            x=voterProportion)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +
+  labs(y="Democratic Vote Percentage", x="Proportion of Population that Voted") +
+  ggtitle("Democrat vote percentage increases as a higher proportion of people voted")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=`Republicans 2016`,
+                                            x=voterProportion)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +
+  labs(y="Republican Vote Percentage", x="Proportion of Population that Voted")+
+  ggtitle("Republican vote percentage decreases as a higher proportion of people voted")
+
+
+# Medain Income
+ggplot(data=swingStatesTrain, mapping = aes(y=`Democrats 2016`,
+                                            x=log10(Median))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +
+  labs(y="Democratic Vote Percentage", x="Log Median Income")+
+  ggtitle("Democrat vote percentage increases as median income increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Republicans 2016`), 
+                                            x=log10(Median))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +
+  labs(y="Republican Vote Percentage", x="Log Median Income")+
+  ggtitle("Republican vote percentage decreases as median income increases")
+
+
+# Mean Income
+ggplot(data=swingStatesTrain, mapping = aes(y=`Democrats 2016`, x=Mean)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +
+  labs(y="Democratic Vote Percentage", x="Mean Income")+
+  ggtitle("Democrat vote percentage increases as mean income increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=`Republicans 2016`, x= Mean)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +
+  labs(y="Republican Vote Percentage", x="Mean Income")+
+  ggtitle("Republican vote percentage decreases as mean income increases")
+
+
+# Graduate Degree Percent
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Democrats 2016`), 
+                                            x=(`Graduate Degree`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Democratic Vote Percentage", x="Graduate Degree Percentage")+
+  ggtitle("Democrat vote percentage increases as graduate degree percent increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=`Republicans 2016`, 
+                                            x=`Graduate Degree`)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Republican Vote Percentage", x="Graduate Degree Percentage")+
+  ggtitle("Republican vote percentage decreases as graduate degree percent increases")
+
+
+# At Least Bachelor's Degree Percent
+ggplot(data=swingStatesTrain, mapping = aes(y=`Democrats 2016`,
+                                            x=(`At Least Bachelors's Degree`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Democratic Vote Percentage", 
+       x="At Least Bachelors's Degree Percentage") +
+  ggtitle("Democrat vote percentage increases as bachelor degree percent increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=`Republicans 2016`, 
+                                            x=(`At Least Bachelors's Degree`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Republican Vote Percentage", 
+       x="At Least Bachelors's Degree Percentage") +
+  ggtitle("Republican vote percentage decreases as bachelors degree percent increases")
+
+
+# At Least High School Diploma Percent
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Democrats 2016`), 
+                                            x=`At Least High School Diploma`)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Democratic Vote Percentage", 
+       x="At Least High School Diploma Percentage") +
+  ggtitle("Democrat vote percentage increases as high school degree percent increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=`Republicans 2016`, 
+                                            x=`At Least High School Diploma`)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Republican Vote Percentage", x="At Least High School Diploma")+
+  ggtitle("Republican vote percentage decreases as high school degree percent increases")
+
+
+# White Population Percent
+ggplot(data=swingStatesTrain, mapping = aes(y=`Democrats 2016`, 
+                                            x=`White (Not Latino) Population`)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Democratic Vote Percentage", x="White (Not Latino) Population Percentage")+
+  ggtitle("Democrat vote percentage decreases as white percentage increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=`Republicans 2016`, 
+                                            x=`White (Not Latino) Population`)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +  
+  labs(y="Republican Vote Percentage", x="White (Not Latino) Population Percentage")+
+  ggtitle("Republican vote percentage increases as white percentage increases")
+
+
+# African American Population Percent
+ggplot(data=swingStatesTrain, mapping = aes(y=`Democrats 2016`, 
+                                            x=`African American Population`)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Democratic Vote Percentage", x="African American Population Percentage")+
+  ggtitle("Democrat vote percentage increases as african american percentage increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=`Republicans 2016`, 
+                                            x=`African American Population`)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Republican Vote Percentage", x="African American Population Percentage")+
+  ggtitle("Republican vote percentage decreases as african american percentage increases")
+
+
+# Asian American Population Percent
+ggplot(data=swingStatesTrain, mapping = aes(y=`Democrats 2016`, 
+                                            x=`Asian American Population`)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +  
+  labs(y="Democratic Vote Percentage", x="Asian American Population Percentage")+
+  ggtitle("Democrat vote percentage increases as asian american percentage increases")
+
+ggplot(data=swingStatesTrain, mapping = aes(y=`Republicans 2016`, 
+                                            x=`Asian American Population`)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +  
+  labs(y="Republican Vote Percentage", x="Asian American Population Percentage")+
+  ggtitle("Republican vote percentage decreases as asian american percentage increases")
+
+
+# Other Race or Races Percent
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Democrats 2016`), 
+                                            x=(`Other Race or Races`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +   
+  labs(y="Democratic Vote Percentage", x="Other Races Population Percentage")+
+  ggtitle("Democrat vote percentage increases as other races percentage increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=`Republicans 2016`, 
+                                            x=(`Other Race or Races`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Republican Vote Percentage", x="Other Races Population Percentage")+
+  ggtitle("Republican vote percentage decreases as other races percentage increases")
+
+
+# Latino Population Percent
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Democrats 2016`), 
+                                            x=log2(`Latino Population`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +  
+  labs(y="Democratic Vote Percentage", x="Log Latino Population Percentage")+
+  ggtitle("Democrat vote percentage increases as latino percentage increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Republicans 2016`), 
+                                            x=log2(`Latino Population`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +  
+  labs(y="Republican Vote Percentage", x="Log Latino Population Percentage")+
+  ggtitle("Republican vote percentage decreases as latino percentage increases")
+
+
+# Native American Population Percent
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Democrats 2016`), 
+                                            x=log2(`Native American Population`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +  
+  labs(y="Democratic Vote Percentage", x="Log Native American Population Percentage")+
+  ggtitle("Democrat vote percentage slightly increases as native american percentage increases")
+
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Republicans 2016`), 
+                                            x=log2(`Native American Population`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +  
+  labs(y="Republican Vote Percentage", x="Log Native American Population Percentage")+
+  ggtitle("Republican vote percentage decreases as native american percentage increases")
+
+# Children Under 6 Living in Poverty Percent
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Democrats 2016`), 
+                                            x=(`Children Under 6 Living in Poverty`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +  
+  labs(y="Democratic Vote Percentage", x="Log Children Under 6 Living in Poverty Percent")+
+  ggtitle("Democrat vote percentage decreases as children living in poverty percent increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Republicans 2016`), 
+                                            x=log2(`Children Under 6 Living in Poverty`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +  
+  labs(y="Republican Vote Percentage", x="Log Children Under 6 Living in Poverty")+
+  ggtitle("Republican vote percentage increases as children living in poverty percent increases")
+
+
+# Adults 65 and Older Living in Poverty Percent
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Democrats 2016`), 
+                                            x=log2(`Adults 65 and Older Living in Poverty`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +  
+  labs(y="Democratic Vote Percentage", x="Log Adults 65 and Older Living in Poverty Percent")+
+  ggtitle("Democrat vote percentage decreases as seniors living in poverty percent increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Republicans 2016`), 
+                                            x=log2(`Adults 65 and Older Living in Poverty`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Republican Vote Percentage", x="Log Adults 65 and Older Living in Poverty")+
+  ggtitle("Democrat vote percentage increases as seniors living in poverty percent increases")
+
+
+# Median Age
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Democrats 2016`), 
+                                            x=log2(`Median Age`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Democratic Vote Percentage", x="Log Median Age")+
+  ggtitle("Democrat vote percentage decreases as the median age increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Republicans 2016`), 
+                                            x=log2(`Median Age`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Republican Vote Percentage", x="Log Median Age")+
+  ggtitle("Republican vote percentage increases as the median age increases")
+
+
+# Unemployment Rate
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Democrats 2016`), 
+                                            x=log2(`Unemployment`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Democratic Vote Percentage", x="Log Unemployment Rate")+
+  ggtitle("Democrat vote percentage decreases as the unemployment rate increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Republicans 2016`), 
+                                            x=log2(`Unemployment`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Republican Vote Percentage", x="Log Unemployment Rate")+
+  ggtitle("Republican vote percentage increases as the unemployment rate increases")
+
+
+# Poverty.Rate.below.federal.poverty.threshold
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Democrats 2016`), 
+                      x=log2(`Poverty Rate`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") +
+  labs(y="Democratic Vote Percentage", x="Log Poverty Rate Below Federal Poverty Threshold")+
+  ggtitle("Democrat vote percentage decreases as poverty rate increases")
+
+
+ggplot(data=swingStatesTrain, mapping = aes(y=(`Republicans 2016`), 
+                      x=log2(`Poverty Rate`))) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_smooth(method = "lm", color = "red") + 
+  labs(y="Republican Vote Percentage", x="Log Poverty Rate Below Federal Poverty Threshold")+
+  ggtitle("Republican vote percentage increases as poverty rate increases")
+```
+
+This is to figure out the best predictor to add to the democrats model. 
+```{r}
+#Getting first predictor to add to Democrats 2016
+step1 <- function(response, predictors, candidates, partition)
+{
+  rhs <- paste0(paste0(predictors, collapse="+"), "+", candidates)
+  formulas <- lapply(paste0(response, "~", rhs), as.formula)
+  rmses <- sapply(formulas,
+                  function(fm) rmse(lm(fm, data=partition$train),
+                                    data=partition$valid))
+  names(rmses) <- candidates
+  attr(rmses, "best") <- rmses[which.min(rmses)]
+  rmses
+}
+
+model <- NULL
+
+# The best first predictor for Democrats is White (Not Latino) Population
+preds <- "1"
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`At Least High School Diploma`", 
+           "`White (Not Latino) Population`", "`African American Population`",
+           "`Asian American Population`", "`Other Race or Races`", 
+           "log2(`Latino Population`)", "log2(`Native American Population`)",
+           "log2(`Children Under 6 Living in Poverty`)", 
+           "log2(`Adults 65 and Older Living in Poverty`)", "log2(`Median Age`)",
+           "log2(`Unemployment`)", "log2(`Poverty Rate)")
+s1 <- best_predictor("`Democrats 2016`", preds, cands,
+                     swingStatesPart)
+
+model <- c(model, attr(s1, "best"))
+s1
+model
+
+
+```
+
+This section shows the residuals for adding White Population as the first 
+predictor to the Democrats model
+```{r message=FALSE, warning=FALSE}
+#Residuals Graph for first predictor added to democrats
+swingStatesTrain
+fitDemocrats <- lm( `Democrats 2016` ~ `White (Not Latino) Population`,
+                    data=swingStatesTrain)
+summary(fitDemocrats)
+
+
+resid <- swingStatesTrain  %>%
+  add_residuals(fitDemocrats, "resid")
+
+swingStatesTrain  %>%
+  add_residuals(fitDemocrats, "resid") %>%
+  ggplot(mapping = aes(x = `White (Not Latino) Population`, y = resid)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "red") +
+  labs(x = "White (Not Latino) Population Percentage", y = "Residuals",
+       title = "Residuals versus white population percentage shows a simple random scatter") +
+  theme_minimal()
+
+
+swingStatesTrain%>%
+  add_residuals(fitDemocrats, "resid") %>%
+  ggplot(aes(sample=resid)) +
+  geom_qq() +
+  labs(x = "Theoretical", y = "Sample", 
+       title = "QQ-plot shows residuals that are normally distributed") +
+  theme_minimal()
+```
+
+This section gets the full model for Republicans 2016 Vote PErcentage uisng 
+stepwise model selection
+```{r}
+#Code to get the rest of the model for Democrats 2016
+#Using same stepwise function defined earlier 
+model <- NULL
+
+preds <- "1"
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`At Least High School Diploma`", 
+           "`White (Not Latino) Population`", "`African American Population`",
+           "`Asian American Population`", "`Other Race or Races`", 
+           "log2(`Latino Population`)", "log2(`Native American Population`)",
+           "log2(`Children Under 6 Living in Poverty`)", 
+           "log2(`Adults 65 and Older Living in Poverty`)", "log2(`Median Age`)",
+           "log2(Unemployment)", "log2(`Poverty Rate`)")
+s1 <- best_predictor("`Democrats 2016`", preds, cands,
+                     swingStatesPart)
+
+model <- c(model, attr(s1, "best"))
+s1
+model
+
+preds <- "`White (Not Latino) Population`"
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`At Least High School Diploma`", 
+           "`African American Population`", "`Asian American Population`", 
+           "`Other Race or Races`", "log2(`Latino Population`)", 
+           "log2(`Native American Population`)",
+           "log2(`Children Under 6 Living in Poverty`)", 
+           "log2(`Adults 65 and Older Living in Poverty`)", "log2(`Median Age`)",
+           "log2(Unemployment)", "log2(`Poverty Rate`)")
+s2 <- best_predictor("`Democrats 2016`", preds, cands,
+                     swingStatesPart)
+
+model <- c(model, attr(s2, "best"))
+s2
+model
+
+preds <- c("`White (Not Latino) Population`", "`At Least High School Diploma`")
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`African American Population`", 
+           "`Asian American Population`", "`Other Race or Races`", 
+           "log2(`Latino Population`)", "log2(`Native American Population`)",
+           "log2(`Children Under 6 Living in Poverty`)", 
+           "log2(`Adults 65 and Older Living in Poverty`)", "log2(`Median Age`)",
+           "log2(Unemployment)", 
+           "log2(`Poverty Rate`)")
+s3 <- best_predictor("`Democrats 2016`", preds, cands,
+                     swingStatesPart)
+
+model <- c(model, attr(s3, "best"))
+s3
+model
+
+preds <- c("`White (Not Latino) Population`", "`At Least High School Diploma`", 
+           "`Asian American Population`")
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`African American Population`", 
+           "`Other Race or Races`", "log2(`Latino Population`)", 
+           "log2(`Native American Population`)",
+           "log2(`Children Under 6 Living in Poverty`)", 
+           "log2(`Adults 65 and Older Living in Poverty`)", "log2(`Median Age`)",
+           "log2(Unemployment)", "log2(`Poverty Rate`)")
+s4 <- best_predictor("`Democrats 2016`", preds, cands,
+                     swingStatesPart)
+
+model <- c(model, attr(s4, "best"))
+s4
+model
+
+preds <- c("`White (Not Latino) Population`", "`At Least High School Diploma`", 
+           "`Asian American Population`", "log2(`Poverty Rate`)")
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`African American Population`", 
+           "`Other Race or Races`", "log2(`Latino Population`)", 
+           "log2(`Native American Population`)", "log2(`Median Age`)",
+           "log2(Unemployment)")
+s5 <- best_predictor("`Democrats 2016`", preds, cands,
+                     swingStatesPart)
+
+model <- c(model, attr(s5, "best"))
+s5
+model
+
+preds <- c("`White (Not Latino) Population`", "`At Least High School Diploma`", 
+           "`Asian American Population`", "log2(`Poverty Rate`)",
+           "`Other Race or Races`")
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`African American Population`", 
+           "log2(`Latino Population`)", "log2(`Native American Population`)", 
+           "log2(`Median Age`)", "log2(Unemployment)")
+s6 <- best_predictor("`Democrats 2016`", preds, cands,
+                     swingStatesPart)
+
+model <- c(model, attr(s6, "best"))
+s6
+model
+
+preds <- c("`White (Not Latino) Population`", "`At Least High School Diploma`", 
+           "`Asian American Population`", "log2(`Poverty Rate`)",
+           "`Other Race or Races`", "log2(Unemployment)")
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`African American Population`", 
+           "log2(`Latino Population`)", "log2(`Native American Population`)", 
+           "log2(`Median Age`)")
+s7 <- best_predictor("`Democrats 2016`", preds, cands,
+                     swingStatesPart)
+
+s7
+model
+
+step_model <- tibble(index=seq_along(model),
+                     variable=factor(names(model), levels=names(model)),
+                     RMSE=model)
+
+ggplot(step_model, aes(x=RMSE)) +
+  geom_point(aes(y=variable)) +
+  geom_line(aes(y=index)) +
+  labs(title="RMSE of Democrats 2016 model after each predictor added 
+  using stepwise model selection", 
+       y = "Predictors Added to Model") +
+  theme_minimal()
+
+#Going to not include log2(unemployment) because in order to prevent overfitting
+
+```
+  
+This section does ANOVA testing to see if removing the predictors in the model is
+significant. This shows how final Democrats 2016 Vote Percentage model went from 
+6 predictors to 3.
+```{r}
+#Final Model and ANOVA testing for Democrats 2016 model
+fitDemocratsFinal <- lm(`Democrats 2016` ~ `White (Not Latino) Population` + 
+                        `At Least High School Diploma` + 
+                        `Asian American Population` + log2(`Poverty Rate`) +
+                        `Other Race or Races` + log2(Unemployment), 
+                        data=swingStatesTrain)
+summary(fitDemocratsFinal)
+
+
+# Show that removing the last three predictors added are not significant
+# This is the most important one to show 
+fit1 <- lm(`Democrats 2016` ~ `White (Not Latino) Population` + 
+           `At Least High School Diploma` + `Asian American Population`, 
+            data=swingStatesTrain)
+
+anova(fitDemocratsFinal, fit1)
+
+# Remmove Last Two Predictors
+newModel1 <- lm(`Democrats 2016` ~ `White (Not Latino) Population` + 
+                `At Least High School Diploma` + `Asian American Population`,
+                data=swingStatesTrain)
+
+# Test whether removing any more predictors from new full model is significant
+fit2 <- lm(`Democrats 2016` ~ `White (Not Latino) Population` + 
+            `At Least High School Diploma`, data=swingStatesTrain)
+
+anova(newModel1, fit2)
+
+fit3 <- lm(`Democrats 2016` ~ `White (Not Latino) Population` + 
+            `Asian American Population`, data=swingStatesTrain)
+
+anova(newModel1, fit3)
+```
+
+This section creates the final official model for the Democrats 2016 as the 
+response variable and gets the RMSE on the test set
+``` {r}
+#Final Model for Democrats 2016 and then get RMSE on the test set
+#FINAL MODEL FOR DEMOCRATS IS lm(`Democrats 2016` ~ `White (Not Latino) 
+#Population` + `At Least High School Diploma` + `Asian American Population`)
+finalModelDemocrats <- lm(`Democrats 2016` ~ `White (Not Latino) Population` + 
+                           `At Least High School Diploma` + 
+                           `Asian American Population`, data=swingStatesTrain)
+summary(finalModelDemocrats)
+
+rmse(finalModelDemocrats1, swingStatesPart$test)
+```
+
+This section finds the best predictor for Republicans 2016 model 
+```{r}
+#Code to find the best first predictor for Republican model. 
+#Uses the same stepwise model selection function as for the Democrats from above. 
+model1 <- NULL
+
+# Using same stepwise function defined earlier 
+# The best first predictor for Republicans is also White (Not Latino) Population
+preds <- "1"
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`At Least High School Diploma`", 
+           "`White (Not Latino) Population`", "`African American Population`",
+           "`Asian American Population`", "`Other Race or Races`", 
+           "log2(`Latino Population`)", "log2(`Native American Population`)",
+           "log2(`Children Under 6 Living in Poverty`)", 
+           "log2(`Adults 65 and Older Living in Poverty`)", "log2(`Median Age`)",
+           "log2(`Unemployment`)", "log2(`Poverty Rate`)")
+s1 <- best_predictor("`Republicans 2016`", preds, cands,
+                     swingStatesPart)
+
+model1 <- c(model1, attr(s1, "best"))
+s1
+model1
+```
+
+This section shows the resiudal graphs for adding White Population as first 
+predictor to Republicans model 
+``` {r}
+#Residuals Graph for first predictor added to republicans
+swingStatesTrain
+fitRepublicans <- lm( `Republicans 2016` ~ `White (Not Latino) Population`,
+                    data=swingStatesTrain)
+summary(fitRepublicans)
+
+
+resid1 <- swingStatesTrain  %>%
+  add_residuals(fitRepublicans, "resid1")
+
+swingStatesTrain  %>%
+  add_residuals(fitRepublicans, "resid1") %>%
+  ggplot(mapping = aes(x = `White (Not Latino) Population`, y = resid1)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "red") +
+  labs(x = "White (Not Latino) Population Percentage", y = "Residuals",
+       title = "Residuals versus white population percentage shows a simple random scatter") +
+  theme_minimal()
+
+swingStatesTrain%>%
+  add_residuals(fitRepublicans, "resid1") %>%
+  ggplot(aes(sample=resid1)) +
+  geom_qq() +
+  labs(x = "Theoretical", y = "Sample", 
+       title = "QQ-plot shows residuals that are normally distributed") +
+  theme_minimal()
+```
+
+This section gets the full model for Republicans 2016 Vote Percetnage uisng 
+stepwise model selection
+``` {r}
+#Stepwise function to get the final model for Republicans 2016
+#Using same stepwise function defined earlier 
+model1 <- NULL
+
+preds <- "1"
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`At Least High School Diploma`", 
+           "`White (Not Latino) Population`", "`African American Population`",
+           "`Asian American Population`", "`Other Race or Races`", 
+           "log2(`Latino Population`)", "log2(`Native American Population`)",
+           "log2(`Children Under 6 Living in Poverty`)", 
+           "log2(`Adults 65 and Older Living in Poverty`)", "log2(`Median Age`)",
+           "log2(`Unemployment`)", "log2(log2(`Poverty Rate`))")
+s1 <- best_predictor("`Republicans 2016`", preds, cands,
+                     swingStatesPart)
+
+model1 <- c(model1, attr(s1, "best"))
+s1
+model1
+
+
+preds <- "`White (Not Latino) Population`"
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`At Least High School Diploma`", 
+           "`African American Population`", "`Asian American Population`", 
+           "`Other Race or Races`", "log2(`Latino Population`)", 
+           "log2(`Native American Population`)",
+           "log2(`Children Under 6 Living in Poverty`)", 
+           "log2(`Adults 65 and Older Living in Poverty`)", "log2(`Median Age`)",
+           "log2(Unemployment)", "log2(`Poverty Rate`)")
+s2 <- best_predictor("`Republicans 2016`", preds, cands,
+                     swingStatesPart)
+
+model1 <- c(model1, attr(s2, "best"))
+s2
+model1
+
+preds <- c("`White (Not Latino) Population`", "`At Least High School Diploma`")
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`African American Population`", 
+           "`Asian American Population`", "`Other Race or Races`", 
+           "log2(`Latino Population`)", "log2(`Native American Population`)",
+           "log2(`Children Under 6 Living in Poverty`)", 
+           "log2(`Adults 65 and Older Living in Poverty`)", "log2(`Median Age`)",
+           "log2(Unemployment)", "log2(`Poverty Rate`)")
+s3 <- best_predictor("`Republicans 2016`", preds, cands,
+                     swingStatesPart)
+
+model1 <- c(model1, attr(s3, "best"))
+s3
+model1
+
+preds <- c("`White (Not Latino) Population`", "`At Least High School Diploma`", 
+           "`Asian American Population`")
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`African American Population`", 
+           "`Other Race or Races`", "log2(`Latino Population`)", 
+           "log2(`Native American Population`)",
+           "log2(`Children Under 6 Living in Poverty`)", 
+           "log2(`Adults 65 and Older Living in Poverty`)", "log2(`Median Age`)",
+           "log2(Unemployment)", "log2(`Poverty Rate`)")
+s4 <- best_predictor("`Republicans 2016`", preds, cands,
+                     swingStatesPart)
+
+model1 <- c(model1, attr(s4, "best"))
+s4
+model1
+
+preds <- c("`White (Not Latino) Population`", "`At Least High School Diploma`", 
+           "`Asian American Population`", "log2(`Poverty Rate`)")
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`African American Population`", 
+           "`Other Race or Races`", "log2(`Latino Population`)", 
+           "log2(`Native American Population`)", "log2(`Median Age`)",
+           "log2(Unemployment)")
+s5 <- best_predictor("`Republicans 2016`", preds, cands,
+                     swingStatesPart)
+
+model1 <- c(model1, attr(s5, "best"))
+s5
+model1
+
+preds <- c("`White (Not Latino) Population`", "`At Least High School Diploma`", 
+           "`Asian American Population`", "log2(`Poverty Rate`)",
+           "`Other Race or Races`")
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`African American Population`", 
+           "log2(`Latino Population`)", "log2(`Native American Population`)", 
+           "log2(`Median Age`)", "log2(Unemployment)")
+s6 <- best_predictor("`Republicans`", preds, cands,
+                     swingStatesPart)
+
+model1 <- c(model1, attr(s6, "best"))
+s6
+model1
+
+preds <- c("`White (Not Latino) Population`", "`At Least High School Diploma`", 
+           "`Asian American Population`", "log2(`Poverty Rate`)",
+           "`Other Race or Races`", "log2(Unemployment)")
+cands <- c("voterProportion", "log10(Median)", "Mean", "`Graduate Degree`", 
+           "`At Least Bachelors's Degree`", "`African American Population`", 
+           "log2(`Latino Population`)", "log2(`Native American Population`)", 
+           "log2(`Median Age`)")
+s7 <- best_predictor("`Republicans 2016`", preds, cands,
+                     swingStatesPart)
+
+s7
+model1
+
+step_model1 <- tibble(index=seq_along(model1),
+                     variable=factor(names(model1), levels=names(model1)),
+                     RMSE=model1)
+
+
+ggplot(step_model1, aes(x=RMSE)) +
+  geom_point(aes(y=variable)) +
+  geom_line(aes(y=index)) +
+  labs(title="RMSE of Republicans 2016 model after each predictor added 
+  using stepwise model selection", 
+       y = "Predictors Added to Model") +
+  theme_minimal()
+
+#Going to not include log2(unemployment) because in order to prevent overfitting
+```
+
+This section does ANOVA testing to see if removing the predictors in the model is
+significant. This shows how final Republicans 2016 Vote Percentage model went from 
+6 predictors to 3.
+```{r}
+#Final Model and ANOVA testing for Republicans 2016 model
+fitRepublicansFinal <- lm(`Republicans 2016` ~ `White (Not Latino) Population` + 
+                          `At Least High School Diploma` + 
+                          `Asian American Population` + log2(`Poverty Rate`) + 
+                          `Other Race or Races` + log2(Unemployment),
+                          data=swingStatesTrain)
+summary(fitRepublicansFinal)
+
+
+# Show that removing the last three predictors added are not significant
+# This is the most important one to show 
+fit1 <- lm(`Republicans 2016` ~ `White (Not Latino) Population` + 
+           `At Least High School Diploma` + `Asian American Population`, 
+            data=swingStatesTrain)
+
+anova(fitRepublicansFinal, fit1)
+
+# New model without include log2(poverty rate) and other race and races
+newModel <- lm(`Republicans 2016` ~ `White (Not Latino) Population` + 
+               `At Least High School Diploma` + `Asian American Population`,
+               data=swingStatesTrain)
+summary(newModel)
+
+# Test whether removing any more predictors from new full model is significant
+fit2 <- lm(`Republicans 2016` ~ `White (Not Latino) Population` + 
+            `At Least High School Diploma`, data=swingStatesTrain)
+
+anova(newModel, fit2)
+
+fit3 <- lm(`Republicans 2016` ~ `White (Not Latino) Population` + 
+            `Asian American Population`, data=swingStatesTrain)
+
+anova(newModel, fit3)
+```
+
+This section creates the final official model for the Democrats 2016 and 
+Republicans 2016 as the response variable and gets the RMSE for the model on the
+test set
+``` {r}
+#Final Model for Democrats 2016 Vote Percentage and then get RMSE on the test set
+#Final model for Democrats 2016 Vote Percentage is:
+#lm(`Democrats 2016` ~ `White (Not Latino) Population` + `At Least High School
+#Diploma` + `Asian American Population`)
+finalModelDemocrats <- lm(`Democrats 2016` ~ `White (Not Latino) Population` + 
+                           `At Least High School Diploma` + 
+                           `Asian American Population`, data=swingStatesTrain)
+summary(finalModelDemocrats)
+
+#RMSE of the Democrats model on the test Set is 7.841428
+rmse(finalModelDemocrats, swingStatesPart$test)
+
+
+
+#Final Model for Republicans 2016 Vote Percentage and then get RMSE on the test 
+#set
+#Final model for Republicans 2016 Vote Percentage is:
+#lm(`Republicans 2016` ~ `White (Not Latino) Population` + `At Least High School
+#Diploma` + `Asian American Population`)
+finalModelRepublicans <- lm(`Republicans 2016` ~ `White (Not Latino) Population` 
+                            + `At Least High School Diploma` + 
+                           `Asian American Population`, data=swingStatesTrain)
+summary(finalModelRepublicans)
+
+#RMSE of the Republican model on the test Set is 8.157785
+rmse(finalModelRepublicans, swingStatesPart$test)
+```
+
+
+
+
+
