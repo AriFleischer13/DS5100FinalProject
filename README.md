@@ -1,0 +1,1 @@
+Code for DS5110 Project. Analyzed which predictors had the biggest effect on Democrat and Republicsn vote percentage in swing states in the 2016 election to try and figure out whrere the election polls went wrong 
